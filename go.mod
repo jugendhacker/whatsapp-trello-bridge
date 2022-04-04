@@ -4,6 +4,8 @@ go 1.18
 
 require github.com/mdp/qrterminal/v3 v3.0.0
 
+require github.com/Jeffail/gabs v1.4.0 // indirect
+
 require (
 	filippo.io/edwards25519 v1.0.0-rc.1 // indirect
 	github.com/adlio/trello v1.9.0 // indirect

@@ -1,17 +1,16 @@
 package server
 
 import (
-	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"time"
 
-	"github.com/adlio/trello"
 	"github.com/gin-gonic/gin"
-	"go.mau.fi/whatsmeow"
 )
 
-func StartServer(trelloClient *trello.Client, whatsAppClient *whatsmeow.Client) {
-	server := gin.Default()
+func StartServer(next chan bool) {
+	server := gin.New()
+	server.Use(gin.Recovery())
 
 	// required for creating webhook
 	server.HEAD("/callback", func(c *gin.Context) {
@@ -19,29 +18,28 @@ func StartServer(trelloClient *trello.Client, whatsAppClient *whatsmeow.Client) 
 	})
 
 	server.POST("/callback", func(c *gin.Context) {
+		fmt.Println("Request")
 		bytes, err := ioutil.ReadAll(c.Request.Body)
 		if err != nil {
 			fmt.Println(err)
 			c.Status(500)
 			return
 		}
+		fmt.Println("Verifying webhook")
+
 		if !VerifySignature(&c.Request.Header, bytes) {
+			fmt.Println("Invalid signature")
 			c.Status(403)
 			return
 		}
-
-		var request WebhookRequest
-		err2 := json.Unmarshal(bytes, &request)
-
-		if err2 != nil {
-			fmt.Println(err2)
-			c.Status(500)
-			return
-		}
-
+		fmt.Println("Signature verified")
 		c.Status(200)
-		Handle(trelloClient, whatsAppClient, request)
+		Handle(bytes)
 	})
-
+	go func() {
+		time.Sleep(time.Second)
+		next <- true
+	}()
+	fmt.Println("Starting webhook server")
 	server.Run()
 }
