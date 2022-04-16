@@ -8,6 +8,7 @@ import (
 
 	"github.com/drdeee/techsupport/platforms"
 	"github.com/drdeee/techsupport/server"
+	store "github.com/drdeee/techsupport/store"
 	"github.com/joho/godotenv"
 )
 
@@ -16,6 +17,8 @@ func main() {
 	if err != nil {
 		fmt.Println("Error loading .env file")
 	}
+
+	store.Requests.Init()
 
 	platforms.InitWhatsAppClient()
 	platforms.InitTrelloClient()

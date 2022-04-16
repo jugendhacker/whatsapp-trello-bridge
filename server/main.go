@@ -18,21 +18,17 @@ func StartServer(next chan bool) {
 	})
 
 	server.POST("/callback", func(c *gin.Context) {
-		fmt.Println("Request")
 		bytes, err := ioutil.ReadAll(c.Request.Body)
 		if err != nil {
 			fmt.Println(err)
 			c.Status(500)
 			return
 		}
-		fmt.Println("Verifying webhook")
-
 		if !VerifySignature(&c.Request.Header, bytes) {
 			fmt.Println("Invalid signature")
 			c.Status(403)
 			return
 		}
-		fmt.Println("Signature verified")
 		c.Status(200)
 		Handle(bytes)
 	})
