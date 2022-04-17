@@ -6,8 +6,8 @@ import (
 
 	"github.com/Jeffail/gabs"
 	"github.com/adlio/trello"
-	"github.com/drdeee/techsupport/platforms"
-	"github.com/drdeee/techsupport/store"
+	"github.com/drdeee/whatsapp-trello-bridge/platforms"
+	"github.com/drdeee/whatsapp-trello-bridge/store"
 )
 
 var actionWhiteList = []string{"updateCard", "commentCard"}
@@ -47,8 +47,6 @@ func Handle(data []byte) {
 		handleUpdateCard(request, card, field)
 	case "commentCard":
 		handleCommentCard(request, card, field)
-	default:
-		fmt.Printf("Unkhandled action type: %s\n", actionType)
 	}
 
 }

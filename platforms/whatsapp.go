@@ -19,7 +19,7 @@ import (
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 
-	store "github.com/drdeee/techsupport/store"
+	store "github.com/drdeee/whatsapp-trello-bridge/store"
 )
 
 var WhatsAppClient *whatsmeow.Client

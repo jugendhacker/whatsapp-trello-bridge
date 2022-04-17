@@ -1,4 +1,4 @@
-module github.com/drdeee/techsupport
+module github.com/drdeee/whatsapp-trello-bridge
 
 go 1.18
 

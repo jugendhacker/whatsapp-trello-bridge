@@ -1,6 +1,7 @@
 name: Docker Build
 
 on:
+  push:
   workflow_dispatch:
 
 jobs:
@@ -29,4 +30,4 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/drdeee/techsupport
+            ghcr.io/drdeee/whatsapp-trello-bridge:${{ github.ref_name }}

@@ -6,9 +6,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/drdeee/techsupport/platforms"
-	"github.com/drdeee/techsupport/server"
-	store "github.com/drdeee/techsupport/store"
+	"github.com/drdeee/whatsapp-trello-bridge/platforms"
+	"github.com/drdeee/whatsapp-trello-bridge/server"
+	store "github.com/drdeee/whatsapp-trello-bridge/store"
 	"github.com/joho/godotenv"
 )
 
