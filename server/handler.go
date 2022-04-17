@@ -43,26 +43,10 @@ func Handle(data []byte) {
 	}
 
 	switch actionType {
-	case "updateCard":
-		handleUpdateCard(request, card, field)
 	case "commentCard":
 		handleCommentCard(request, card, field)
-	}
-
-}
-
-func handleUpdateCard(request *gabs.Container, card *trello.Card, field string) {
-	if request.Path("action.data.listAfter").Data() != nil {
-		if request.Path("action.data.listAfter.id").Data().(string) == platforms.LIST_ID_DONE {
-			// card moved to done list, closing it
-			store.Requests.SetState(field, "")
-			err := platforms.SendTextWithJID(field, "Dein Ticket wurde geschlossen. Falls du der Meinung bist, dass dein Problem noch nicht gelöst wurde, kannst du gerne einfach eine weitere Nachricht schreiben :)")
-			if err != nil {
-				card.AddComment("**[BOT]** Die Quelle dieser Karte ist ungültig. Deine Nachricht konnte nicht weitergeleitet werden.")
-			}
-			card.AddComment("**[BOT]** Dieses Ticket wurde geschlossen.")
-			platforms.SetTrelloCustomFieldValue(card.ID, "")
-		}
+	case "updateCard":
+		handleUpdateCard(request, card, field)
 	}
 }
 
@@ -76,5 +60,13 @@ func handleCommentCard(request *gabs.Container, card *trello.Card, field string)
 	err := platforms.SendTextWithJID(field, text)
 	if err != nil {
 		card.AddComment("**[BOT]** Die Quelle dieser Karte ist ungültig. Deine Nachricht konnte nicht weitergeleitet werden.")
+	}
+}
+
+func handleUpdateCard(request *gabs.Container, card *trello.Card, field string) {
+	if request.Path("action.data.card").Data() != nil && request.Path("action.data.card.closed").Data().(bool) && request.Path("action.data.old").Data() != nil && !request.Path("action.data.old.closed").Data().(bool) {
+		store.Requests.SetState(field, "")
+		platforms.SetTrelloCustomFieldValue(card.ID, "")
+		card.AddComment("**[BOT]** Diese Karte ist nun geschlossen, und wird keine weiteren Nachrichten mehr erhalten bzw. weiterleiten.")
 	}
 }

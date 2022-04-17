@@ -78,10 +78,10 @@ func eventHandler(event interface{}) {
 		state := store.Requests.GetState(evt.Info.Chat.String())
 		if state == "" {
 			var card = &trello.Card{
-				Name:    getUsername(evt),
-				Desc:    evt.Message.GetConversation(),
+				Name:    getUsername(evt, true),
+				Desc:    getCardDescription(evt),
 				IDBoard: os.Getenv("TRELLO_BOARD_ID"),
-				IDList:  LIST_ID_NEW}
+				IDList:  LIST_ID_UNREAD}
 			err := TrelloClient.CreateCard(card)
 			if err == nil {
 				err = SetTrelloCustomFieldValue(card.ID, evt.Info.Sender.ToNonAD().String())
@@ -94,7 +94,6 @@ func eventHandler(event interface{}) {
 				SendText(*evt, "Deine Anfrage konnte nicht weitergeleitet werden :( Bitte versuche es später nochmal erneut.")
 			} else {
 				store.Requests.SetState(evt.Info.Chat.ToNonAD().String(), card.ID)
-				SendText(*evt, "Deine Anfrage wurde erfolgreich weitergeleitet. Wir kümmern uns so schnell wie möglich darum.")
 			}
 		} else {
 			card, err := TrelloClient.GetCard(state)
@@ -107,33 +106,47 @@ func eventHandler(event interface{}) {
 					msg += "\n\n*(Neuer Anhang)* "
 				}
 				_, err := card.AddComment(msg)
+				if err == nil {
+					err = card.MoveToList(LIST_ID_UNREAD)
+					if err == nil {
+						err = card.MoveToTopOfList()
+					}
+				}
 				if err == nil && hasAttachment {
 					err = UploadTrelloAttachment(card.ID, attachmentFile, attachmentName)
 				}
 				if err != nil {
 					fmt.Println("Error adding comment to card:", err)
 					SendText(*evt, "Deine Nachricht konnte nicht weitergeleitet werden :( Bitte versuche es später nochmal erneut.")
-				} else {
-					SendText(*evt, "Deine Nachricht wurde deiner Anfrage hinzugefügt.")
+
 				}
 			}
 		}
 	}
 }
 
-func getUsername(evt *events.Message) string {
-	number := evt.Info.Sender.User
+func getCardDescription(evt *events.Message) string {
+	n := evt.Info.Sender.User
+	return fmt.Sprintf("**Name:** %s\n**Nummer:** [+%s](https://wa.me/%s)\n**Erste Nachricht:** %s", getUsername(evt, false), n, n, time.Now().Local().Format("2006-01-02 15:04"))
+}
+
+func getUsername(evt *events.Message, withNumber bool) string {
+	number := " (" + evt.Info.Sender.User + ")"
+	if !withNumber {
+		number = ""
+	}
+
 	contact, err := WhatsAppClient.Store.Contacts.GetContact(evt.Info.Sender)
 	if err != nil || !contact.Found {
 		if evt.Info.PushName != "" {
-			return evt.Info.PushName + " (" + number + ")"
+			return evt.Info.PushName + number
 		}
 		return number
 	} else {
 		if contact.BusinessName != "" {
-			return contact.BusinessName + " (" + number + ")"
+			return contact.BusinessName + number
 		} else if contact.FullName != "" {
-			return contact.FullName + " (" + number + ")"
+			return contact.FullName + number
 		} else {
 			return evt.Info.Sender.User
 		}

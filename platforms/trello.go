@@ -16,13 +16,13 @@ import (
 var TrelloClient *trello.Client
 var customFieldId string
 
-var LIST_ID_NEW, LIST_ID_DONE string
+var LIST_ID_UNREAD string
 
 func InitTrelloClient() *trello.Client {
 	fmt.Println("Initializing trello client")
 
 	// setup variables
-	LIST_ID_NEW, LIST_ID_DONE = os.Getenv("TRELLO_LIST_NEW_ID"), os.Getenv("TRELLO_LIST_DONE_ID")
+	LIST_ID_UNREAD = os.Getenv("TRELLO_LIST_UNREAD_ID")
 
 	// create trello client
 	client := trello.NewClient(os.Getenv("TRELLO_KEY"), os.Getenv("TRELLO_TOKEN"))
@@ -103,20 +103,17 @@ func checkLists(board *trello.Board) {
 		panic("Could not load list of board")
 	}
 
-	var new bool
-	var done bool
+	var unread bool
 
 	for _, list := range lists {
 		switch list.ID {
-		case LIST_ID_NEW:
-			new = true
-		case LIST_ID_DONE:
-			done = true
+		case LIST_ID_UNREAD:
+			unread = true
 		}
 	}
 
-	if !new || !done {
-		data, _ := fmt.Printf("Some list not found (new: %t, done: %t)\n", new, done)
+	if !unread {
+		data, _ := fmt.Printf("Unread list not found")
 
 		// print all names and ids of lists
 		for _, list := range lists {
