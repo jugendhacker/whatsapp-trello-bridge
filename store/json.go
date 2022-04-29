@@ -8,8 +8,6 @@ import (
 
 type RequestStore map[string]string
 
-var Requests RequestStore = RequestStore{}
-
 func (store RequestStore) Init() {
 	fmt.Println("Initializing store")
 	bytes, err := os.ReadFile(os.Getenv("DATABASE_FILE"))

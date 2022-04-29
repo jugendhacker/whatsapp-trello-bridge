@@ -7,47 +7,68 @@ import (
 	"io/ioutil"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 
 	"github.com/Jeffail/gabs"
 	"github.com/adlio/trello"
 )
 
-var TrelloClient *trello.Client
-var customFieldId string
+type TrelloClient struct {
+	Client *trello.Client
+	Board  *trello.Board
+	Lists  struct {
+		Unread string
+	}
+	customFieldId string
+	trelloAuth    string
 
-var LIST_ID_UNREAD string
+	publicUrl url.URL
+}
 
-func InitTrelloClient() *trello.Client {
+func (c *TrelloClient) GetURL(p string) string {
+	u, _ := url.Parse(c.publicUrl.String())
+	u.Path = path.Join(u.Path, p)
+	return u.String()
+}
+
+func (c *TrelloClient) Init() {
+	url, err := url.Parse(os.Getenv("PUBLIC_URL"))
+	c.publicUrl = *url
+	if err != nil {
+		panic("Invalid public url: " + err.Error())
+	}
+
 	fmt.Println("Initializing trello client")
 
 	// setup variables
-	LIST_ID_UNREAD = os.Getenv("TRELLO_LIST_UNREAD_ID")
+	c.Lists.Unread = os.Getenv("TRELLO_LIST_UNREAD_ID")
 
 	// create trello client
-	client := trello.NewClient(os.Getenv("TRELLO_KEY"), os.Getenv("TRELLO_TOKEN"))
+	c.Client = trello.NewClient(os.Getenv("TRELLO_KEY"), os.Getenv("TRELLO_TOKEN"))
 
 	// get trello board
-	board, err := client.GetBoard(os.Getenv("TRELLO_BOARD_ID"))
+	c.Board, err = c.Client.GetBoard(os.Getenv("TRELLO_BOARD_ID"))
 	if err != nil {
 		// trello board not found, stop execution
 		panic("Invalid or missing environment variables: " + err.Error())
 	}
-	fmt.Println("Trello board found: " + board.Name)
+	fmt.Println("Trello board found: " + c.Board.Name)
 
-	checkCustomFields(board)
+	c.checkCustomFields()
 
 	if os.Getenv("TRELLO_HASH_KEY") == "" {
 		panic("Trello hash key not set")
 	}
 
-	checkLists(board)
-	TrelloClient = client
-	return client
+	c.checkLists()
+
+	c.trelloAuth = "key=" + os.Getenv("TRELLO_KEY") + "&token=" + os.Getenv("TRELLO_TOKEN")
 }
 
-func checkCustomFields(board *trello.Board) {
-	fields, err := board.GetCustomFields()
+func (c *TrelloClient) checkCustomFields() {
+	fields, err := c.Board.GetCustomFields()
 	if err != nil {
 		panic("Error getting custom fields: " + err.Error())
 	}
@@ -56,7 +77,7 @@ func checkCustomFields(board *trello.Board) {
 	for _, field := range fields {
 		if field.Name == os.Getenv("TRELLO_CUSTOM_FIELD_NAME") {
 			if field.Type == "text" {
-				customFieldId = field.ID
+				c.customFieldId = field.ID
 				return
 			} else {
 				panic("Custom field exists but is not of type text")
@@ -65,17 +86,17 @@ func checkCustomFields(board *trello.Board) {
 	}
 
 	// create custom field
-	err = createCustomField()
+	err = c.createCustomField()
 	if err != nil {
 		panic("Could not create custom field: " + err.Error())
 	}
 }
 
-func CheckTrelloWebhooks() {
+func (c *TrelloClient) CheckTrelloWebhooks() {
 
 	var webhooks []trello.Webhook
 
-	webhooks, err := getWebhooks()
+	webhooks, err := c.getWebhooks()
 	if err != nil {
 		panic("Error getting trello webhooks: " + err.Error())
 	}
@@ -84,21 +105,21 @@ func CheckTrelloWebhooks() {
 
 	// check if webhook has correct callback url
 	for _, webhook := range webhooks {
-		if webhook.CallbackURL == os.Getenv("TRELLO_CALLBACK_URL") {
+		if webhook.CallbackURL == c.GetURL("/callback") {
 			exists = true
 		}
 	}
 
 	if !exists {
-		err := createWebhook(os.Getenv("TRELLO_BOARD_ID"))
+		err := c.createWebhook()
 		if err != nil {
 			panic("Error creating trello webhook: " + err.Error())
 		}
 	}
 }
 
-func checkLists(board *trello.Board) {
-	lists, err := board.GetLists()
+func (c *TrelloClient) checkLists() {
+	lists, err := c.Board.GetLists()
 	if err != nil {
 		panic("Could not load list of board")
 	}
@@ -107,7 +128,7 @@ func checkLists(board *trello.Board) {
 
 	for _, list := range lists {
 		switch list.ID {
-		case LIST_ID_UNREAD:
+		case c.Lists.Unread:
 			unread = true
 		}
 	}
@@ -124,20 +145,23 @@ func checkLists(board *trello.Board) {
 
 }
 
-func createWebhook(boardId string) error {
+func (c *TrelloClient) createWebhook() error {
 	// make http post
-	var path = "https://api.trello.com/1/tokens/" + os.Getenv("TRELLO_TOKEN") + "/webhooks?key=" + os.Getenv("TRELLO_KEY") + "&callbackURL=" + os.Getenv("TRELLO_CALLBACK_URL") + "&idModel=" + boardId
+	var path = "https://api.trello.com/1/tokens/" + os.Getenv("TRELLO_TOKEN") + "/webhooks?key=" + os.Getenv("TRELLO_KEY") + "&callbackURL=" + c.GetURL("/callback") + "&idModel=" + c.Board.ID
 	res, err := http.Post(path, "application/json", nil)
 	if err != nil {
 		return err
 	} else if res.StatusCode != 200 {
+		// print body
+		body, _ := ioutil.ReadAll(res.Body)
+		fmt.Println(string(body))
 		return fmt.Errorf("error creating webhook")
 	}
 
 	return nil
 }
 
-func getWebhooks() ([]trello.Webhook, error) {
+func (c *TrelloClient) getWebhooks() ([]trello.Webhook, error) {
 	resp, err := http.Get("https://api.trello.com/1/tokens/" + os.Getenv("TRELLO_TOKEN") + "/webhooks?key=" + os.Getenv("TRELLO_KEY"))
 
 	var webhooks []trello.Webhook
@@ -150,7 +174,7 @@ func getWebhooks() ([]trello.Webhook, error) {
 	}
 }
 
-func createCustomField() error {
+func (c *TrelloClient) createCustomField() error {
 	reqBody, err := json.Marshal(map[string]string{
 		"idModel":   os.Getenv("TRELLO_BOARD_ID"),
 		"modelType": "board",
@@ -162,7 +186,7 @@ func createCustomField() error {
 		return err
 	}
 	// make http post
-	var path = "https://api.trello.com/1/customFields?key=" + os.Getenv("TRELLO_KEY") + "&token=" + os.Getenv("TRELLO_TOKEN") + "&pos=top"
+	var path = "https://api.trello.com/1/customFields?" + c.trelloAuth + "&pos=top"
 	res, err := http.Post(path, "application/json", bytes.NewBuffer(reqBody))
 	if err != nil {
 		return err
@@ -175,13 +199,13 @@ func createCustomField() error {
 		return err
 	}
 
-	customFieldId = body.Path("id").Data().(string)
+	c.customFieldId = body.Path("id").Data().(string)
 	return nil
 }
 
-func GetTrelloCustomFieldValue(cardId string) (string, error) {
+func (c *TrelloClient) GetTrelloCustomFieldValue(cardId string) (string, error) {
 	//make http get
-	var path = "https://api.trello.com/1/cards/" + cardId + "/customFieldItems?key=" + os.Getenv("TRELLO_KEY") + "&token=" + os.Getenv("TRELLO_TOKEN")
+	var path = "https://api.trello.com/1/cards/" + cardId + "/customFieldItems?" + c.trelloAuth
 	res, err := http.Get(path)
 	if err != nil {
 		return "", fmt.Errorf("Error getting trello custom field value: " + err.Error())
@@ -199,16 +223,16 @@ func GetTrelloCustomFieldValue(cardId string) (string, error) {
 	}
 
 	for _, field := range arr {
-		if field["idCustomField"].(string) == customFieldId {
+		if field["idCustomField"].(string) == c.customFieldId {
 			return field["value"].(map[string]interface{})["text"].(string), nil
 		}
 	}
 	return "", fmt.Errorf("could not find value of custom field")
 }
 
-func SetTrelloCustomFieldValue(cardId string, value string) error {
+func (c *TrelloClient) SetTrelloCustomFieldValue(cardId string, value string) error {
 	//make http put
-	var path = "https://api.trello.com/1/card/" + cardId + "/customField/" + customFieldId + "/item?key=" + os.Getenv("TRELLO_KEY") + "&token=" + os.Getenv("TRELLO_TOKEN")
+	var path = "https://api.trello.com/1/card/" + cardId + "/customField/" + c.customFieldId + "/item?" + c.trelloAuth
 	req, err := http.NewRequest("PUT", path, bytes.NewBuffer([]byte(`{"value":{"text":"`+value+`"}}`)))
 	if err != nil {
 		return err
@@ -223,8 +247,8 @@ func SetTrelloCustomFieldValue(cardId string, value string) error {
 	return nil
 }
 
-func UploadTrelloAttachment(cardId, filePath, fileName string) error {
-	var path = "https://api.trello.com/1/cards/" + cardId + "/attachments?key=" + os.Getenv("TRELLO_KEY") + "&token=" + os.Getenv("TRELLO_TOKEN")
+func (c *TrelloClient) UploadTrelloAttachment(cardId, filePath, fileName string) error {
+	var path = "https://api.trello.com/1/cards/" + cardId + "/attachments?" + c.trelloAuth
 	var b bytes.Buffer
 	w := multipart.NewWriter(&b)
 	fileWriter, err := w.CreateFormFile("file", fileName)
@@ -260,20 +284,3 @@ func UploadTrelloAttachment(cardId, filePath, fileName string) error {
 		return nil
 	}
 }
-
-/*
-func deleteTWebhook(webhookId string) error {
-	var path = "https://api.trello.com/1/tokens/" + os.Getenv("TRELLO_TOKEN") + "/webhooks/" + webhookId + "?key=" + os.Getenv("TRELLO_KEY")
-	// make http delete
-	req, err := http.NewRequest("DELETE", path, nil)
-	if err != nil {
-		return err
-	}
-	res, err1 := http.DefaultClient.Do(req)
-	if err1 != nil {
-		return err1
-	}
-	fmt.Print(res.Status)
-	return nil
-}
-*/

@@ -7,7 +7,7 @@ import (
 	"syscall"
 
 	"github.com/drdeee/whatsapp-trello-bridge/platforms"
-	"github.com/drdeee/whatsapp-trello-bridge/server"
+	serv "github.com/drdeee/whatsapp-trello-bridge/server"
 	store "github.com/drdeee/whatsapp-trello-bridge/store"
 	"github.com/joho/godotenv"
 )
@@ -18,20 +18,27 @@ func main() {
 		fmt.Println("Error loading .env file")
 	}
 
-	store.Requests.Init()
+	store := store.RequestStore{}
 
-	platforms.InitWhatsAppClient()
-	platforms.InitTrelloClient()
+	trelloClient := platforms.TrelloClient{}
+	trelloClient.Init()
 
+	whatsappClient := platforms.WhatsAppClient{}
+
+	// start server
+	var server = serv.Server{}
 	next := make(chan bool, 1)
-	go server.StartServer(next)
+	go server.Start(next, &trelloClient, &whatsappClient, &store)
 	<-next
 
 	// check webhooks
-	platforms.CheckTrelloWebhooks()
+	trelloClient.CheckTrelloWebhooks()
+
+	// init whatsapp
+	whatsappClient.Init(&trelloClient, &store)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	<-c
-	platforms.WhatsAppClient.Disconnect()
+	whatsappClient.Client.Disconnect()
 }

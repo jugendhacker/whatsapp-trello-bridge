@@ -22,9 +22,14 @@ import (
 	store "github.com/drdeee/whatsapp-trello-bridge/store"
 )
 
-var WhatsAppClient *whatsmeow.Client
+type WhatsAppClient struct {
+	Client       *whatsmeow.Client
+	trelloClient *TrelloClient
+	store        *store.RequestStore
+	ready        bool
+}
 
-func InitWhatsAppClient() whatsmeow.Client {
+func (c *WhatsAppClient) Init(trelloClient *TrelloClient, store *store.RequestStore) {
 	fmt.Println("Initializing WhatsApp client")
 	dbLog := waLog.Stdout("Database", "WARN", true)
 	container, err := sqlstore.New("sqlite3", "file:"+os.Getenv("WHATSAPP_DATABASE_FILE")+"?_foreign_keys=on", dbLog)
@@ -36,12 +41,12 @@ func InitWhatsAppClient() whatsmeow.Client {
 		panic(err)
 	}
 	clientLog := waLog.Stdout("WhatsApp Client", "WARN", true)
-	client := whatsmeow.NewClient(deviceStore, clientLog)
-	client.AddEventHandler(eventHandler)
+	c.Client = whatsmeow.NewClient(deviceStore, clientLog)
+	c.Client.AddEventHandler(c.eventHandler)
 
-	if client.Store.ID == nil {
-		qrChan, _ := client.GetQRChannel(context.Background())
-		err = client.Connect()
+	if c.Client.Store.ID == nil {
+		qrChan, _ := c.Client.GetQRChannel(context.Background())
+		err = c.Client.Connect()
 		if err != nil {
 			panic(err)
 		}
@@ -54,52 +59,62 @@ func InitWhatsAppClient() whatsmeow.Client {
 		}
 	} else {
 		// Already logged in, just connect
-		err = client.Connect()
+		err = c.Client.Connect()
 		if err != nil {
 			panic(err)
 		}
+		c.ready = true
 	}
-	WhatsAppClient = client
-	return *client
 }
 
-func eventHandler(event interface{}) {
+func (c *WhatsAppClient) IsReady() bool {
+	return c.ready
+}
+
+func (c *WhatsAppClient) eventHandler(event interface{}) {
 	switch evt := event.(type) {
 	case *events.Message:
-		WhatsAppClient.MarkRead([]string{evt.Info.ID}, time.Now(), evt.Info.Chat, evt.Info.Sender)
-		hasAttachment, attachmentFile, attachmentName, err := getAttachment(evt)
+		c.Client.MarkRead([]string{evt.Info.ID}, time.Now(), evt.Info.Chat, evt.Info.Sender)
+		hasAttachment, attachmentFile, attachmentName, err := c.getAttachment(evt)
 		if err != nil {
 			if err.Error() != "type unsupported" {
 				fmt.Println(err)
-				SendText(*evt, "Der Anhang deiner Nachricht konnte nicht heruntergeladen werden :(")
+				c.SendText(*evt, "Der Anhang deiner Nachricht konnte nicht heruntergeladen werden :(")
 			}
 			return
 		}
-		state := store.Requests.GetState(evt.Info.Chat.String())
+		state := c.store.GetState(evt.Info.Chat.String())
 		if state == "" {
 			var card = &trello.Card{
-				Name:    getUsername(evt, true),
-				Desc:    getCardDescription(evt),
-				IDBoard: os.Getenv("TRELLO_BOARD_ID"),
-				IDList:  LIST_ID_UNREAD}
-			err := TrelloClient.CreateCard(card)
+				Name:    c.getUsername(evt, true),
+				Desc:    c.getCardDescription(evt),
+				IDBoard: c.trelloClient.Board.ID,
+				IDList:  c.trelloClient.Lists.Unread}
+			err := c.trelloClient.Client.CreateCard(card)
 			if err == nil {
-				err = SetTrelloCustomFieldValue(card.ID, evt.Info.Sender.ToNonAD().String())
+				err = c.trelloClient.SetTrelloCustomFieldValue(card.ID, evt.Info.Sender.ToNonAD().String())
 				if err == nil && hasAttachment {
-					err = UploadTrelloAttachment(card.ID, attachmentFile, attachmentName)
+					err = c.trelloClient.UploadTrelloAttachment(card.ID, attachmentFile, attachmentName)
 				}
 			}
 			if err != nil {
 				fmt.Println("Error creating card:", err)
-				SendText(*evt, "Deine Anfrage konnte nicht weitergeleitet werden :( Bitte versuche es später nochmal erneut.")
+				c.SendText(*evt, "Deine Nachricht konnte nicht weitergeleitet werden :( Bitte versuche es später nochmal erneut.")
+				return
 			} else {
-				store.Requests.SetState(evt.Info.Chat.ToNonAD().String(), card.ID)
+				c.store.SetState(evt.Info.Chat.ToNonAD().String(), card.ID)
+			}
+
+			_, err = card.AddComment(evt.Message.GetConversation())
+			if err != nil {
+				fmt.Println("Error adding comment:", err)
+				c.SendText(*evt, "Deine Nachricht konnte nicht weitergeleitet werden :( Bitte versuche es später nochmal erneut.")
 			}
 		} else {
-			card, err := TrelloClient.GetCard(state)
+			card, err := c.trelloClient.Client.GetCard(state)
 			if err != nil {
-				fmt.Println("Error adding comment to card:", err)
-				SendText(*evt, "Deine Nachricht konnte nicht weitergeleitet werden :( Bitte versuche es später nochmal erneut.")
+				fmt.Println("Card not found:", err)
+				c.SendText(*evt, "Deine Nachricht konnte nicht weitergeleitet werden :( Bitte versuche es später nochmal erneut.")
 			} else {
 				msg := "**[USER]** " + evt.Message.GetConversation()
 				if hasAttachment {
@@ -107,36 +122,34 @@ func eventHandler(event interface{}) {
 				}
 				_, err := card.AddComment(msg)
 				if err == nil {
-					err = card.MoveToList(LIST_ID_UNREAD)
+					err = card.MoveToList(c.trelloClient.Lists.Unread)
 					if err == nil {
 						err = card.MoveToTopOfList()
 					}
 				}
 				if err == nil && hasAttachment {
-					err = UploadTrelloAttachment(card.ID, attachmentFile, attachmentName)
+					err = c.trelloClient.UploadTrelloAttachment(card.ID, attachmentFile, attachmentName)
 				}
 				if err != nil {
 					fmt.Println("Error adding comment to card:", err)
-					SendText(*evt, "Deine Nachricht konnte nicht weitergeleitet werden :( Bitte versuche es später nochmal erneut.")
-
+					c.SendText(*evt, "Deine Nachricht konnte nicht weitergeleitet werden :( Bitte versuche es später nochmal erneut.")
 				}
 			}
 		}
 	}
 }
 
-func getCardDescription(evt *events.Message) string {
+func (c *WhatsAppClient) getCardDescription(evt *events.Message) string {
 	n := evt.Info.Sender.User
-	return fmt.Sprintf("**Name:** %s\n**Nummer:** [+%s](https://wa.me/%s)\n**Erste Nachricht:** %s", getUsername(evt, false), n, n, time.Now().Local().Format("2006-01-02 15:04"))
+	return fmt.Sprintf("**Name:** %s\n**Nummer:** [+%s](https://wa.me/%s)\n**Erste Nachricht:** %s", c.getUsername(evt, false), n, n, time.Now().Local().Format("2006-01-02 15:04"))
 }
 
-func getUsername(evt *events.Message, withNumber bool) string {
+func (c *WhatsAppClient) getUsername(evt *events.Message, withNumber bool) string {
 	number := " (" + evt.Info.Sender.User + ")"
 	if !withNumber {
 		number = ""
 	}
-
-	contact, err := WhatsAppClient.Store.Contacts.GetContact(evt.Info.Sender)
+	contact, err := c.Client.Store.Contacts.GetContact(evt.Info.Sender)
 	if err != nil || !contact.Found {
 		if evt.Info.PushName != "" {
 			return evt.Info.PushName + number
@@ -153,25 +166,25 @@ func getUsername(evt *events.Message, withNumber bool) string {
 	}
 }
 
-func getAttachment(evt *events.Message) (bool, string, string, error) {
+func (c *WhatsAppClient) getAttachment(evt *events.Message) (bool, string, string, error) {
 	var msg whatsmeow.DownloadableMessage
 	var originalFileName string
 	if evt.Message.GetVideoMessage() != nil {
-		ext, err := getExtensionFromMimeType(evt.Message.GetVideoMessage().GetMimetype())
+		ext, err := c.getExtensionFromMimeType(evt.Message.GetVideoMessage().GetMimetype())
 		if err != nil {
 			return false, "", "", err
 		}
 		originalFileName = "video" + ext
 		msg = evt.Message.GetVideoMessage()
 	} else if evt.Message.GetAudioMessage() != nil {
-		ext, err := getExtensionFromMimeType(evt.Message.GetAudioMessage().GetMimetype())
+		ext, err := c.getExtensionFromMimeType(evt.Message.GetAudioMessage().GetMimetype())
 		if err != nil {
 			return false, "", "", err
 		}
 		originalFileName = "audio" + ext
 		msg = evt.Message.GetAudioMessage()
 	} else if evt.Message.GetDocumentMessage() != nil {
-		ext, err := getExtensionFromMimeType(evt.Message.GetDocumentMessage().GetMimetype())
+		ext, err := c.getExtensionFromMimeType(evt.Message.GetDocumentMessage().GetMimetype())
 		if err != nil {
 			return false, "", "", err
 		}
@@ -181,7 +194,7 @@ func getAttachment(evt *events.Message) (bool, string, string, error) {
 		}
 		msg = evt.Message.GetDocumentMessage()
 	} else if evt.Message.GetImageMessage() != nil {
-		ext, err := getExtensionFromMimeType(evt.Message.GetImageMessage().GetMimetype())
+		ext, err := c.getExtensionFromMimeType(evt.Message.GetImageMessage().GetMimetype())
 		if err != nil {
 			return false, "", "", err
 		}
@@ -189,12 +202,12 @@ func getAttachment(evt *events.Message) (bool, string, string, error) {
 		msg = evt.Message.GetImageMessage()
 	}
 	if evt.Message.GetConversation() == "" && msg == nil {
-		SendText(*evt, "Dieser Nachrichtentyp wird leider nicht unterstützt :(")
+		c.SendText(*evt, "Dieser Nachrichtentyp wird leider nicht unterstützt :(")
 		return false, "", "", fmt.Errorf("type unsupported")
 	}
 
 	if msg != nil {
-		file, err := WhatsAppClient.Download(msg)
+		file, err := c.Client.Download(msg)
 		if err != nil {
 			return false, "", "", err
 		}
@@ -222,21 +235,21 @@ func saveBytesToTempFile(data []byte) (string, error) {
 	return tmpfile.Name(), nil
 }
 
-func SendText(evt events.Message, err string) {
-	WhatsAppClient.SendMessage(evt.Info.Chat, "", &waProto.Message{Conversation: proto.String(err)})
+func (c *WhatsAppClient) SendText(evt events.Message, err string) {
+	c.Client.SendMessage(evt.Info.Chat, "", &waProto.Message{Conversation: proto.String(err)})
 }
 
-func SendTextWithJID(chatJID string, msg string) error {
+func (c *WhatsAppClient) SendTextWithJID(chatJID string, msg string) error {
 	msgData := &waProto.Message{Conversation: proto.String(msg)}
 	jid, err := types.ParseJID(chatJID)
 	if err != nil {
 		return err
 	}
-	_, err = WhatsAppClient.SendMessage(jid.ToNonAD(), "", msgData)
+	_, err = c.Client.SendMessage(jid.ToNonAD(), "", msgData)
 	return err
 }
 
-func getExtensionFromMimeType(mimeType string) (string, error) {
+func (c *WhatsAppClient) getExtensionFromMimeType(mimeType string) (string, error) {
 	exts, err := mime.ExtensionsByType(mimeType)
 	if err != nil {
 		return "", err
