@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-func CreateDigest(content string) string {
+func (server *Server) createDigest(content string) string {
 	// create hmac (sha1) of content and transform to base64
 	h := hmac.New(sha1.New, []byte(os.Getenv("TRELLO_HASH_KEY")))
 
@@ -19,6 +19,19 @@ func CreateDigest(content string) string {
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 
-func VerifySignature(header *http.Header, body []byte) bool {
-	return header.Get("X-Trello-Webhook") == CreateDigest(string(body)+os.Getenv("TRELLO_CALLBACK_URL"))
+func (server *Server) verifySignature(header *http.Header, body []byte) bool {
+	return header.Get("X-Trello-Webhook") == server.createDigest(string(body)+server.trello.GetURL("/callback"))
+}
+
+func (server *Server) isOnline() bool {
+	// do get request
+	resp, err := http.Get(server.trello.GetURL("/status"))
+	if err != nil {
+		return false
+	}
+
+	if resp.StatusCode != 200 {
+		return false
+	}
+	return true
 }

@@ -6,13 +6,11 @@ import (
 
 	"github.com/Jeffail/gabs"
 	"github.com/adlio/trello"
-	"github.com/drdeee/whatsapp-trello-bridge/platforms"
-	"github.com/drdeee/whatsapp-trello-bridge/store"
 )
 
 var actionWhiteList = []string{"updateCard", "commentCard"}
 
-func Handle(data []byte) {
+func (s *Server) handle(data []byte) {
 	request, err := gabs.ParseJSON(data)
 	if err != nil {
 		fmt.Printf("Error parsing webhook JSON: %s\n", err.Error())
@@ -31,8 +29,8 @@ func Handle(data []byte) {
 		return
 	}
 
-	card, _ := platforms.TrelloClient.GetCard(request.Path("action.data.card.id").Data().(string))
-	field, err := platforms.GetTrelloCustomFieldValue(card.ID)
+	card, _ := s.trello.Client.GetCard(request.Path("action.data.card.id").Data().(string))
+	field, err := s.trello.GetTrelloCustomFieldValue(card.ID)
 	if err != nil {
 		fmt.Println(err.Error())
 		return
@@ -44,36 +42,36 @@ func Handle(data []byte) {
 
 	switch actionType {
 	case "updateCard":
-		handleUpdateCard(request, card, field)
+		s.handleUpdateCard(request, card, field)
 	case "commentCard":
-		handleCommentCard(request, card, field)
+		s.handleCommentCard(request, card, field)
 	}
 
 }
 
-func handleUpdateCard(request *gabs.Container, card *trello.Card, field string) {
+func (s *Server) handleUpdateCard(request *gabs.Container, card *trello.Card, field string) {
 	if request.Path("action.data.listAfter").Data() != nil {
-		if request.Path("action.data.listAfter.id").Data().(string) == platforms.LIST_ID_DONE {
+		if request.Path("action.data.listAfter.id").Data().(string) == s.trello.Lists.Done {
 			// card moved to done list, closing it
-			store.Requests.SetState(field, "")
-			err := platforms.SendTextWithJID(field, "Dein Ticket wurde geschlossen. Falls du der Meinung bist, dass dein Problem noch nicht gelöst wurde, kannst du gerne einfach eine weitere Nachricht schreiben :)")
+			s.store.SetState(field, "")
+			err := s.whatsApp.SendTextWithJID(field, "Dein Ticket wurde geschlossen. Falls du der Meinung bist, dass dein Problem noch nicht gelöst wurde, kannst du gerne einfach eine weitere Nachricht schreiben :)")
 			if err != nil {
 				card.AddComment("**[BOT]** Die Quelle dieser Karte ist ungültig. Deine Nachricht konnte nicht weitergeleitet werden.")
 			}
 			card.AddComment("**[BOT]** Dieses Ticket wurde geschlossen.")
-			platforms.SetTrelloCustomFieldValue(card.ID, "")
+			s.trello.SetTrelloCustomFieldValue(card.ID, "")
 		}
 	}
 }
 
-func handleCommentCard(request *gabs.Container, card *trello.Card, field string) {
+func (s *Server) handleCommentCard(request *gabs.Container, card *trello.Card, field string) {
 	text := request.Path("action.data.text").Data().(string)
 
 	if strings.HasPrefix(text, "**[BOT]** ") || strings.HasPrefix(text, "**[USER]** ") {
 		return
 	}
 
-	err := platforms.SendTextWithJID(field, text)
+	err := s.whatsApp.SendTextWithJID(field, text)
 	if err != nil {
 		card.AddComment("**[BOT]** Die Quelle dieser Karte ist ungültig. Deine Nachricht konnte nicht weitergeleitet werden.")
 	}
