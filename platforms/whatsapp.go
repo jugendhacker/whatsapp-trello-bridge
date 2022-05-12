@@ -83,8 +83,8 @@ func (c *WhatsAppClient) eventHandler(event interface{}) {
 			}
 			return
 		}
-		state := c.store.GetState(evt.Info.Chat.String())
-		if state == "" {
+		state, err := c.store.GetState(evt.Info.Chat.String())
+		if err != nil {
 			var card = &trello.Card{
 				Name:    c.getUsername(evt),
 				Desc:    evt.Message.GetConversation(),
