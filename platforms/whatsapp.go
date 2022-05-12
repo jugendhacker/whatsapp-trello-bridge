@@ -83,7 +83,7 @@ func (c *WhatsAppClient) eventHandler(event interface{}) {
 			}
 			return
 		}
-		state, err := c.store.GetState(evt.Info.Chat.String())
+		state, err := c.store.GetState(*evt.Message.Chat.Id)
 		if err != nil {
 			var card = &trello.Card{
 				Name:    c.getUsername(evt),
@@ -101,7 +101,7 @@ func (c *WhatsAppClient) eventHandler(event interface{}) {
 				fmt.Println("Error creating card:", err)
 				c.SendText(*evt, "Deine Anfrage konnte nicht weitergeleitet werden :( Bitte versuche es später nochmal erneut.")
 			} else {
-				c.store.SetState(evt.Info.Chat.ToNonAD().String(), card.ID)
+				c.store.SetState(*evt.Message.Chat.Id, card.ID)
 				c.SendText(*evt, "Deine Anfrage wurde erfolgreich weitergeleitet. Wir kümmern uns so schnell wie möglich darum.")
 			}
 		} else {
