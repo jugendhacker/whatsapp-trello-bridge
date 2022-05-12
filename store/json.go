@@ -35,6 +35,9 @@ func (store RequestStore) SetState(whatsAppId, state string) {
 	store.save()
 }
 
-func (store RequestStore) GetState(whatsAppId string) string {
-	return store[whatsAppId]
+func (store RequestStore) GetState(whatsAppId string) (string, error) {
+	if entry, ok := store[whatsAppId]; ok {
+		return entry, nil
+	}
+	return "", fmt.Errorf("whatsAppId %v does not exist in store", whatsAppId)
 }
