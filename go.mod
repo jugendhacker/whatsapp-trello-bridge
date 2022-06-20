@@ -8,7 +8,7 @@ require github.com/Jeffail/gabs v1.4.0
 
 require (
 	filippo.io/edwards25519 v1.0.0-rc.1 // indirect
-	github.com/adlio/trello v1.9.0
+	github.com/adlio/trello v1.10.0
 	github.com/gin-contrib/sse v0.1.0 // indirect
 	github.com/gin-gonic/gin v1.7.7
 	github.com/go-playground/locales v0.13.0 // indirect
